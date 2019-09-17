@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Configures the Camel Context-->
+
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:amq="http://activemq.apache.org/schema/core"
+       xmlns:jee="http://www.springframework.org/schema/jee"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-3.0.xsd
+       	http://activemq.apache.org/schema/core http://activemq.apache.org/schema/core/activemq-core.xsd
+       	http://www.springframework.org/schema/jee http://www.springframework.org/schema/jee/spring-jee-3.0.xsd">
+
+	<context:property-placeholder location="classpath:app.properties"/>
+	
+    <!-- ======================================================================================== -->
+    <!-- ============================ PACKAGE SCAN ============================================== -->
+    <!-- ======================================================================================== -->
+	 
+	 <bean id="fileStore" class="org.apache.camel.processor.idempotent.FileIdempotentRepository" factory-method="fileIdempotentRepository">
+		<constructor-arg name="fileStore" value="filesImported.dat" />
+		<constructor-arg name="cacheSize" value="5000" />
+		<constructor-arg name="maxFileStoreSize" value="51200000" />
+	</bean>
+
+	<!-- ======================================================================================== -->
+	<!-- ======================================== ROTAS  ======================================== -->
+	<!-- ======================================================================================== -->
+
+	<camelContext id="contextCamel" streamCache="true" xmlns="http://camel.apache.org/schema/spring">
+	
+		<propertyPlaceholder id="properties" location="classpath:app.properties" />
+
+		<route id="flowListenerSocket" autoStartup="true">
+	   		<from uri="sftp://[ip]/../../home/[user]/?username=[user]&amp;password=[pwd]&amp;fileName=[arq]&amp;delete=false&amp;idempotentKey=${file:name}-${file:modified}&amp;autoCreate=false&amp;noop=true&amp;idempotentRepository=#fileStore&amp;delay=60000"/>
+			<log message="READING -> ${body}" loggingLevel="INFO"/>
+			<to uri="file:///home/marcelo/test_ftp/"/>
+ 			<!-- <from uri="{{env:ROUTE_EXEC}}"/>
+ 			<convertBodyTo type="String"/>
+ 			<log message="${body}" loggingLevel="INFO"/>
+ 			-->
+		</route>
+		
+		<!-- ================================ TESTE  ======================================
+		
+	    <route id="route-test" shutdownRoute="Defer" autoStartup="{{env:ROUTE_TEST}}">
+			<from uri="timer://routeTest?fixedRate=true&amp;period=10000"/>
+			<log message="Rota OK!" loggingLevel="INFO"/>
+		</route>
+		
+		 -->
+		 
+		<!-- ======================== GENERATE - SIMULAÇÂO ================================
+		
+		<route id="generate-data" shutdownRoute="Defer" autoStartup="{{env:GENERATE}}">
+	    	<from uri="timer://timerSendMsg?fixedRate=true&amp;period={{env:STEP}}000"/>
+	    	<setHeader headerName="COUNT_FOR_SEG"><constant>{{env:COUNT_FOR_SEG}}</constant></setHeader>
+			<process ref="generateMessage"/>
+			<to uri="seda:splitMsg"/>
+	    </route>
+	    
+	     -->
+	    
+		<!-- ==============================  SOCKET  ======================================
+		
+		<route id="flowListenerSocket" autoStartup="{{env:SOCKET_NETFLOW}}">
+			<from uri="netty4:udp://{{env:SOCKET_URL}}?udpByteArrayCodec=true&amp;sync=false" />
+ 			<process ref="flowHeaderProcessor" />
+			<to uri="seda:flowMap" pattern="InOnly" />
+		</route>
+		
+		<route id="flowMapProcessor" autoStartup="{{env:SOCKET_NETFLOW}}">
+			<from uri="seda:flowMap?concurrentConsumers={{env:CONSUMERSCOUNT}}"/>
+			<choice>
+				<when>
+					<simple>
+						${in.headers[FLOW_VERSION]} == '1'
+					</simple>
+					<process ref="v1FlowProcessor"/>
+					<log message="Processing Flow version ${in.headers[FLOW_VERSION]}" loggingLevel="DEBUG"/>
+				</when>
+				<when>
+					<simple>
+						${in.headers[FLOW_VERSION]} == '5'
+					</simple>
+					<process ref="v5FlowProcessor"/>
+					<log message="Processing Flow version ${in.headers[FLOW_VERSION]}" loggingLevel="DEBUG"/>
+				</when>
+				<when>
+					<simple>
+						${in.headers[FLOW_VERSION]} == '7'
+					</simple>
+					<process ref="v7FlowProcessor"/>
+					<log message="Processing Flow version ${in.headers[FLOW_VERSION]}" loggingLevel="DEBUG"/>
+				</when>
+				<when>
+					<simple>
+						${in.headers[FLOW_VERSION]} == '9'
+					</simple>
+					<process ref="v9FlowProcessor"/>
+					<log message="Processing Flow version ${in.headers[FLOW_VERSION]}" loggingLevel="DEBUG"/>
+				</when>
+				<otherwise>
+					<log message="Versao nao implementada." loggingLevel="WARN"/>
+				</otherwise>
+			</choice>
+			<to uri="seda:splitMsg"/>
+		</route>
+		
+		 -->
+
+		<!-- =============================   SPLIT TO KAFKA   =======================================
+
+	    <route id="split-msg" shutdownRoute="Defer" autoStartup="{{env:KAFKA_SEND}}">
+			<from uri="seda:splitMsg?concurrentConsumers={{env:CONSUMERSCOUNT}}"/>
+			<split>
+				<simple>${body}</simple>
+				<process ref="convertToKeyAndValue"/>
+				<to uri="kafka:{{env:KAFKA_TOPIC}}?brokers={{env:KAFKA_HOST}}:9092"/>
+			</split>
+		</route>
+		
+		 -->
+		
+		<!-- =============================   PERSISTENCE   =======================================
+		
+		<route id="persistence-data" shutdownRoute="Defer" autoStartup="{{env:PERSISTENCE}}">
+			<from uri="kafka:{{env:KAFKA_TOPIC_AGG}}?brokers={{env:KAFKA_HOST}}:9092&amp;groupId={{env:KAFKA_CONSUMER_GROUP_ID}}&amp;consumersCount={{env:KAFKA_CONSUMERS}}"/>
+			<choice>
+	            <when>
+	            	<simple>"{{env:TYPE}}" == "InfluxDB"</simple>
+					<process ref="influxNative{{env:INFLUXDB_ESTR_VER}}"/>
+	    			<to uri="http4://{{env:INFLUXDB}}:8086/write?db=netflow{{env:INFLUXDB_ESTR_VER}}&amp;throwExceptionOnFailure"/>
+	    			<process ref="exceptionInfluxProcessor"/>
+	    			<log message="${body}" loggingLevel="DEBUG"/>
+	            </when>
+	            <when>
+	            	<simple>"{{env:TYPE}}" == "ElasticSearch"</simple>
+	                <process ref="elasticSearchLayout"/>
+	                <aggregate strategyRef="genericStrategy" completionSize="10" completionTimeout="30000">
+				        <correlationExpression>
+				          <constant>true</constant>
+				        </correlationExpression>
+				        <to uri="seda:persistenceElastic"/>
+				    </aggregate>
+	            </when>
+	        </choice>
+		</route>
+
+		<route id="persistence-elastic" shutdownRoute="Defer" autoStartup="{{env:PERSISTENCE}}">
+			<from uri="seda:persistenceElastic"/>			
+			<process ref="elasticSearchNative"/>
+			<to uri="http4://{{env:ELASTIC}}/netflow/flow/_bulk"/>
+		</route>
+		
+		 -->
+		
+	</camelContext>
+
+</beans>
